@@ -12,6 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from setproctitle import setproctitle
+
+# 프로세스 이름 변경
+setproctitle("sw_distilling")
+
+# 이후 GPU를 사용하는 코드를 실행
+import torch
+torch.randn(10000).cuda()
+
 import argparse
 
 from datasets import DatasetDict, concatenate_datasets
