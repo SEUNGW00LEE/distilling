@@ -1,0 +1,6 @@
+transformers
+datasets
+torch
+sentencepiece
+protobuf==3.20.*
+tensorboardX

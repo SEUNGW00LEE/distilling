@@ -16,6 +16,8 @@
 import os
 import shutil
 import logging
+import torch
+
 
 from transformers import Seq2SeqTrainingArguments, Seq2SeqTrainer
 from transformers import T5ForConditionalGeneration
@@ -24,6 +26,8 @@ from transformers.trainer_utils import set_seed
 
 from model_utils import TaskPrefixDataCollator, TaskPrefixTrainer
 
+# transformers 경고 메시지 억제
+# logging.getLogger("transformers").setLevel(logging.ERROR)
 
 def get_config_dir(args):
     return f'{args.dataset}/{args.from_pretrained.split("/")[1]}/{args.model_type}/{args.llm}/{args.subsample}/{args.label_type}/{args.alpha}/{args.max_input_length}/{args.grad_steps*args.batch_size}/{args.optimizer_name}/{args.lr}'
@@ -36,6 +40,8 @@ def train_and_evaluate(args, run, tokenizer, tokenized_datasets, compute_metrics
 
     if args.parallelize:
         model.parallelize()
+    else:
+        model = model.to('cuda')  # 단일 GPU로 모델을 이동
     
     config_dir = get_config_dir(args)
     output_dir = f'ckpts/{config_dir}/{run}'  # for model ckpts
@@ -54,8 +60,8 @@ def train_and_evaluate(args, run, tokenizer, tokenized_datasets, compute_metrics
 
     training_args = Seq2SeqTrainingArguments(
         output_dir,
-        remove_unused_columns = False,
-        evaluation_strategy = 'steps',
+        remove_unused_columns=False,
+        evaluation_strategy='steps',
         eval_steps=args.eval_steps,
         save_strategy='no',
         save_steps=args.eval_steps,
@@ -70,7 +76,8 @@ def train_and_evaluate(args, run, tokenizer, tokenized_datasets, compute_metrics
         predict_with_generate=True,
         seed=run,
         local_rank=args.local_rank,
-        bf16=args.bf16,
+        bf16=False,  # bf16 비활성화
+        fp16=False,  # fp16 비활성화 추가
         generation_max_length=args.gen_max_len,
         prediction_loss_only=False,
     )
@@ -82,20 +89,19 @@ def train_and_evaluate(args, run, tokenizer, tokenized_datasets, compute_metrics
     else:
         raise ValueError
 
-
+    # `trainer_kwargs`에서 `tokenizer` 항목 제거
     trainer_kwargs = {
         'alpha': args.alpha,
         'output_rationale': args.output_rationale,
         'model': model,
         'args': training_args,
         'train_dataset': tokenized_datasets["train"],
-        'eval_dataset': {'test': tokenized_datasets["test"],},
+        'eval_dataset': tokenized_datasets["test"],
         'data_collator': data_collator,
-        'tokenizer': tokenizer,
         'compute_metrics': compute_metrics,
     }
-    
 
+    # task_prefix와 standard에 따라 trainer 정의
     if args.model_type == 'task_prefix':
         trainer = TaskPrefixTrainer(**trainer_kwargs)
     elif args.model_type == 'standard':
@@ -104,6 +110,6 @@ def train_and_evaluate(args, run, tokenizer, tokenized_datasets, compute_metrics
         trainer = Seq2SeqTrainer(**trainer_kwargs)
     else:
         raise ValueError
-    
 
+    torch.cuda.empty_cache()  # 메모리 캐시 정리
     trainer.train()
